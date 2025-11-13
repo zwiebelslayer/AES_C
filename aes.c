@@ -1,5 +1,5 @@
 #include "aes.h"
-
+#include <string.h> // memcpy
 #include <stdint.h>
 
 
@@ -39,7 +39,26 @@ static const uint8_t sbox[256] =
     0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 };
 
-void RotWord(uint8_t* word) {
+
+static const uint8_t rcon[11] = {
+    0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
+};
+
+
+uint8_t x_times(uint8_t x) {
+    // GF(2^8) multiplication in the Field
+    // Shift left (this is multiplication by 2 before reduction)
+    uint8_t shifted = x << 1;
+
+    // If the original high bit was set, we must reduce with 0x1B
+    if (x & 0x80) {
+        return (shifted ^ 0x1B);
+        // Apply Rijndael reduction polynomial, note normally we would use 11b but we due to the overflow from uint8 we dont need the 0x11b just 0x1b is enough
+    }
+    return shifted; // No reduction needed
+}
+
+void RotWord(uint8_t *word) {
     // four cells aka one row is swapped
     uint8_t temp = word[0];
     word[0] = word[1];
@@ -48,13 +67,81 @@ void RotWord(uint8_t* word) {
     word[3] = temp;
 }
 
-void SubBytes(uint8_t* block) {
+void SubBytes(uint8_t *block) {
     // block is per definition 16 long
-    for (uint8_t i=0; i<BLOCK_SIZE; i++) {
+
+    for (uint8_t i = 0; i < NUMBER_OF_COLUMNS; i++) {
         block[i] = sbox[block[i]]; // swap
     }
 }
 
-void MixColumns(uint8_t* block) {
-    // TODO
+void MixColumns(uint8_t *block) {
+    uint8_t a, b, c, d, e;
+    for (uint8_t i = 0; i < BLOCK_SIZE; i += 4) {
+        a = block[i];
+        b = block[i + 1];
+        c = block[i + 2];
+        d = block[i + 3];
+        e = a ^ b ^ c ^ d;
+        block[i] ^= e ^ x_times(a ^ b);
+        block[i + 1] ^= e ^ x_times(b ^ c);
+        block[i + 2] ^= e ^ x_times(c ^ d);
+        block[i + 3] ^= e ^ x_times(d ^ a);
+    }
+}
+
+
+inline void insert_key_for_round(uint8_t round, uint8_t *key, uint8_t *round_keys_buffer) {
+    // inserts the (round) key for the round position in the round keys buffer
+    // eg. for round one we insert it at position 0 to 3
+    // round two 4 to 8 in the round keys buffer
+    uint8_t start = (round - 1) * 4;
+
+    // Copy 4 bytes into the correct place
+    memcpy(&round_keys_buffer[start], key, 4);
+}
+
+void expand_key(uint8_t *key, uint8_t *round_keys) {
+    /*
+     *fills the round keys array with the respective round keys
+     * for round:
+     * 1. its just the key itself
+     * 2. yeah we need to use the algo
+     * */
+
+    uint8_t tmp[4];
+    uint8_t i;
+    uint8_t len = NUMBER_OF_COLUMNS*(NUMBER_OF_ROUNDS+1);
+    // first round key is just the round key itself
+    for (i = 0; i < NUMBER_OF_32_WORDS_IN_KEY; i++) {
+        round_keys[4*i+0] = key[4*i+0];
+        round_keys[4*i+1] = key[4*i+1];
+        round_keys[4*i+2] = key[4*i+2];
+        round_keys[4*i+3] = key[4*i+3];
+    }
+    // all other round keys need to be calculated
+    for (i = NUMBER_OF_32_WORDS_IN_KEY; i < len; i++) {
+        tmp[0] = round_keys[4*(i-1)+0];
+        tmp[1] = round_keys[4*(i-1)+1];
+        tmp[2] = round_keys[4*(i-1)+2];
+        tmp[3] = round_keys[4*(i-1)+3];
+
+        if (i%NUMBER_OF_32_WORDS_IN_KEY == 0) {
+
+            RotWord(tmp);
+            sub_word(tmp);
+            coef_add(tmp, rcon(i/NUMBER_OF_COLUMNS), tmp);
+
+        } else if (NUMBER_OF_32_WORDS_IN_KEY > 6 && i%NUMBER_OF_ROUNDS == 4) {
+
+            sub_word(tmp);
+
+        }
+
+        round_keys[4*i+0] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+0]^tmp[0];
+        round_keys[4*i+1] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+1]^tmp[1];
+        round_keys[4*i+2] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+2]^tmp[2];
+        round_keys[4*i+3] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+3]^tmp[3];
+    }
+    
 }
