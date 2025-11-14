@@ -1,6 +1,8 @@
 #include "aes.h"
 #include <string.h> // memcpy
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 
 static const uint8_t sbox[256] =
@@ -101,6 +103,15 @@ inline void insert_key_for_round(uint8_t round, uint8_t *key, uint8_t *round_key
     memcpy(&round_keys_buffer[start], key, 4);
 }
 
+
+void gf_addition(uint8_t a[], uint8_t b[], uint8_t d[]) {
+    // d = a + b in the gf2^8 field -> in this field addition is an XOR!
+    d[0] = a[0] ^ b[0];
+    d[1] = a[1] ^ b[1];
+    d[2] = a[2] ^ b[2];
+    d[3] = a[3] ^ b[3];
+}
+
 void expand_key(uint8_t *key, uint8_t *round_keys) {
     /*
      *fills the round keys array with the respective round keys
@@ -111,37 +122,56 @@ void expand_key(uint8_t *key, uint8_t *round_keys) {
 
     uint8_t tmp[4];
     uint8_t i;
-    uint8_t len = NUMBER_OF_COLUMNS*(NUMBER_OF_ROUNDS+1);
+    uint8_t len = NUMBER_OF_COLUMNS * (NUMBER_OF_ROUNDS + 1);
     // first round key is just the round key itself
     for (i = 0; i < NUMBER_OF_32_WORDS_IN_KEY; i++) {
-        round_keys[4*i+0] = key[4*i+0];
-        round_keys[4*i+1] = key[4*i+1];
-        round_keys[4*i+2] = key[4*i+2];
-        round_keys[4*i+3] = key[4*i+3];
+        round_keys[4 * i + 0] = key[4 * i + 0];
+        round_keys[4 * i + 1] = key[4 * i + 1];
+        round_keys[4 * i + 2] = key[4 * i + 2];
+        round_keys[4 * i + 3] = key[4 * i + 3];
     }
     // all other round keys need to be calculated
     for (i = NUMBER_OF_32_WORDS_IN_KEY; i < len; i++) {
-        tmp[0] = round_keys[4*(i-1)+0];
-        tmp[1] = round_keys[4*(i-1)+1];
-        tmp[2] = round_keys[4*(i-1)+2];
-        tmp[3] = round_keys[4*(i-1)+3];
+        tmp[0] = round_keys[4 * (i - 1) + 0];
+        tmp[1] = round_keys[4 * (i - 1) + 1];
+        tmp[2] = round_keys[4 * (i - 1) + 2];
+        tmp[3] = round_keys[4 * (i - 1) + 3];
 
-        if (i%NUMBER_OF_32_WORDS_IN_KEY == 0) {
-
+        if (i % NUMBER_OF_32_WORDS_IN_KEY == 0) {
             RotWord(tmp);
-            sub_word(tmp);
-            coef_add(tmp, rcon(i/NUMBER_OF_COLUMNS), tmp);
-
-        } else if (NUMBER_OF_32_WORDS_IN_KEY > 6 && i%NUMBER_OF_ROUNDS == 4) {
-
-            sub_word(tmp);
-
+            SubBytes(tmp);
+            gf_addition(tmp, &rcon[i / NUMBER_OF_COLUMNS], tmp);
         }
+        //else if (NUMBER_OF_32_WORDS_IN_KEY > 6 && i%NUMBER_OF_ROUNDS == 4) {
+        //
+        //     sub_word(tmp);
+        //
+        // }
 
-        round_keys[4*i+0] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+0]^tmp[0];
-        round_keys[4*i+1] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+1]^tmp[1];
-        round_keys[4*i+2] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+2]^tmp[2];
-        round_keys[4*i+3] = round_keys[4*(i-NUMBER_OF_32_WORDS_IN_KEY)+3]^tmp[3];
+        round_keys[4 * i + 0] = round_keys[4 * (i - NUMBER_OF_32_WORDS_IN_KEY) + 0] ^ tmp[0];
+        round_keys[4 * i + 1] = round_keys[4 * (i - NUMBER_OF_32_WORDS_IN_KEY) + 1] ^ tmp[1];
+        round_keys[4 * i + 2] = round_keys[4 * (i - NUMBER_OF_32_WORDS_IN_KEY) + 2] ^ tmp[2];
+        round_keys[4 * i + 3] = round_keys[4 * (i - NUMBER_OF_32_WORDS_IN_KEY) + 3] ^ tmp[3];
     }
-    
+}
+
+uint8_t *aes128_init(void *key) {
+    //creates the round keys, might fail tho!
+
+    uint8_t *round_keys = malloc(NUMBER_OF_COLUMNS * (NUMBER_OF_ROUNDS + 1) * 4);
+    if (round_keys == NULL) {
+        printf("malloc failed\n");
+        //TODO handle this
+        return NULL; // :) :(
+    }
+    expand_key(key, round_keys);
+    return round_keys;
+}
+
+
+void aes128_encrypt(void *buffer, void *round_keys) {
+    // buffer: the buffer which contains the cleartext/message which shall be encrypted
+
+
+
 }
